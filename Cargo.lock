@@ -11,11 +11,12 @@ dependencies = [
 
 [[package]]
 name = "bcc"
-version = "0.0.25"
+version = "0.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d554bf1e95bbfced9b2ce6de24570bf6390fe11fd2471e83e39a0ead535c6335"
+checksum = "7a30313ae8e23e20e13a17ad94f80df931dfff36c3c78de39432513a7a222ce8"
 dependencies = [
  "bcc-sys",
+ "bitflags",
  "byteorder",
  "libc",
  "regex",

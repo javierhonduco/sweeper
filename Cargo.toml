@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 bcc = "*"
+# bcc = {path = "/home/javierhonduco/rust-bcc"}
 ctrlc = "*"
 rusqlite = "*"
