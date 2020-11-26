@@ -45,8 +45,8 @@ impl Sweeper {
         Sweeper {
             conn: Arc::new(Mutex::new(connection)),
             cleaner_conn: Arc::new(Mutex::new(cleaner_connection)),
-            runnable: runnable,
-            sender: sender,
+            runnable,
+            sender,
             receiver: Arc::new(Mutex::new(receiver)),
             threads: Vec::new(),
         }
@@ -83,15 +83,12 @@ impl Sweeper {
             let conn = conn.lock().unwrap();
 
             while runnable.load(Ordering::SeqCst) {
-                match recv.lock().unwrap().try_recv() {
-                    Ok(event) => {
-                        conn.execute(
-                            "INSERT INTO sweeper (path, name, expire_at) VALUES (?1, ?2, ?3)",
-                            params![event.path, event.name, event.expire_at],
-                        )
-                        .unwrap();
-                    }
-                    Err(_) => (),
+                if let Ok(event) = recv.lock().unwrap().try_recv() {
+                    conn.execute(
+                        "INSERT INTO sweeper (path, name, expire_at) VALUES (?1, ?2, ?3)",
+                        params![event.path, event.name, event.expire_at],
+                    )
+                    .unwrap();
                 }
 
                 thread::sleep(time::Duration::from_millis(100));
@@ -113,14 +110,9 @@ impl Sweeper {
 
     pub fn join_threads(self) {
         for thread in self.threads {
-            match thread.join() {
-                Err(e) => {
-                    eprintln!("Error: {:?}", e);
-                    std::process::exit(1);
-                }
-                _ => {
-                    // Nothing to do here
-                }
+            if let Err(e) = thread.join() {
+                eprintln!("Error: {:?}", e);
+                std::process::exit(1);
             }
         }
     }
@@ -294,12 +286,9 @@ fn main() {
     })
     .expect("ctrlc");
 
-    let sweeper = Sweeper::new(conn, cleaner_conn, runnable.clone());
-    match sweeper.run() {
-        Err(e) => {
-            eprintln!("Error: {:?}", e);
-            std::process::exit(1);
-        }
-        _ => {}
+    let sweeper = Sweeper::new(conn, cleaner_conn, runnable);
+    if let Err(e) = sweeper.run() {
+        eprintln!("Error: {:?}", e);
+        std::process::exit(1);
     }
 }
