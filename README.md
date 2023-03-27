@@ -29,7 +29,7 @@ Chatting with a friend about filesystems, he brought up how badly he wanted all 
 Note: This is just a project made for fun, do not use in production!
 
 ## How does it work?
-Using [BPF](https://ebpf.io/), we trace the system calls (`[l]setxattr(2)`) used to set extended attributes. When a key matching `user.expire_at` is set, it examines the value, and if it looks like like it could potentially be a timestamp, it saves it into a sqlite database.
+Using [BPF](https://ebpf.io/), we trace the system calls (`[l]setxattr(2)`) used to set extended attributes. When a key matching `user.expire_at` is set, it examines the value, and if it looks like it could potentially be a timestamp, it saves it into a sqlite database.
 
 Another thread polls from the DB and if there's something that should be deleted, it goes ahead and removes the file.
 
@@ -46,4 +46,4 @@ The provided path to the extended attribute syscall must be absolute.
   - No indexing in the DB, but this is just a toy!
   - Not deleting DB entries and keep a log of actions
   - Add proper checks
-  - Run the key / value checks in th BPF program
+  - Run the key / value checks in the BPF program
