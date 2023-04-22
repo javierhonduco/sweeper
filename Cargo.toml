@@ -2,12 +2,14 @@
 name = "sweeper"
 version = "0.1.0"
 authors = ["Javier <javierhonduco@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bcc = "*"
-# bcc = {path = "/home/javierhonduco/rust-bcc"}
+libbpf-rs = {version = "0.20.1"}
 ctrlc = "*"
 rusqlite = "*"
+
+[build-dependencies]
+libbpf-cargo = "0.20.1"

@@ -1,12 +1,13 @@
-use bcc::perf_event::PerfMapBuilder;
-use bcc::{BPFBuilder, BccError, Tracepoint};
 use core::sync::atomic::{AtomicBool, Ordering};
+use libbpf_rs::{PerfBufferBuilder};
 use rusqlite::{params, Connection, Result};
 use std::ffi::CStr;
 use std::fs;
 use std::os::raw::c_char;
 use std::ptr;
+use std::time::Duration;
 use std::{thread, time};
+use sweeper::sweeper::SweeperSkelBuilder;
 
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
@@ -102,7 +103,7 @@ impl Sweeper {
         self.setup_cleaner();
         self.process();
         // todo: propagate BccError
-        self.run_bpf().unwrap();
+        self.run_bpf(); // .unwrap();
         self.join_threads();
 
         Ok(())
@@ -117,85 +118,32 @@ impl Sweeper {
         }
     }
 
-    pub fn run_bpf(&self) -> Result<(), BccError> {
-        let text = "
-        #include <uapi/linux/ptrace.h>
+    pub fn run_bpf(&self) {
+        let skel_builder = SweeperSkelBuilder::default();
+        let open_skel = skel_builder.open().unwrap();
+        let mut bpf = open_skel.load().expect("bpf load");
 
-        struct event_t {
-            char path[50];
-            char name[50];
-            char value[50];
-        };
+        let perf_buffer = PerfBufferBuilder::new(bpf.maps().events())
+            .sample_cb(|_cpu: i32, data: &[u8]| {
+                self.on_event(data);
+            })
+            .lost_cb(|cpu, count| {
+                eprintln!("Lost {} events on cpu {}", count, cpu)
+            })
+            .build().expect("perf buffer build");
 
-        BPF_HASH(storage, u64, struct event_t);
-        BPF_PERF_OUTPUT(events);
+        bpf.attach().expect("attach bpf program");
 
-        // Try to extract PWD or the dentry
-        int set_attr_enter(struct tracepoint__syscalls__sys_enter_lsetxattr *args) {
-            struct event_t event = {0};
-
-            // We could validate them here for speed
-            bpf_probe_read_user_str(event.path, sizeof(event.path), args->pathname);
-            bpf_probe_read_user_str(event.name, sizeof(event.name), args->name);
-            bpf_probe_read_user_str(event.value, sizeof(event.value), args->value);
-
-            // bpf_trace_printk(\"=path: %s\\n\", event.path);
-            // bpf_trace_printk(\"=name: %s\\n\", event.name);
-            // bpf_trace_printk(\"=value: %s\\n\", event.value);
-
-            u64 key = bpf_get_current_pid_tgid();
-            storage.insert(&key, &event);
-            return 0;
-        }
-
-        int set_attr_exit(struct tracepoint__syscalls__sys_exit_lsetxattr *args) {
-            if (args->ret != 0) {
-                return 1;
-            }
-
-            u64 key = bpf_get_current_pid_tgid();
-            struct event_t* event = storage.lookup(&key);
-            if (event == NULL) {
-                return 1;
-            }
-            events.perf_submit(args, event, sizeof(struct event_t));
-            storage.delete(&key);
-            return 0;
-        }
-        ";
-        let mut bpf = BPFBuilder::new(text).unwrap().build()?;
-        Tracepoint::new()
-            .handler("set_attr_enter")
-            .subsystem("syscalls")
-            .tracepoint("sys_enter_lsetxattr")
-            .attach(&mut bpf)?;
-        Tracepoint::new()
-            .handler("set_attr_exit")
-            .subsystem("syscalls")
-            .tracepoint("sys_exit_lsetxattr")
-            .attach(&mut bpf)?;
-        Tracepoint::new()
-            .handler("set_attr_enter")
-            .subsystem("syscalls")
-            .tracepoint("sys_enter_setxattr")
-            .attach(&mut bpf)?;
-        Tracepoint::new()
-            .handler("set_attr_exit")
-            .subsystem("syscalls")
-            .tracepoint("sys_exit_setxattr")
-            .attach(&mut bpf)?;
-        let events = bpf.table("events")?;
-
-        let mut perf_buffer = PerfMapBuilder::new(events, || self.on_event()).build()?;
+        let timeout: Duration = Duration::from_millis(200);
         while self.runnable.load(Ordering::SeqCst) {
-            perf_buffer.poll(200);
+            perf_buffer.poll(timeout).expect("perf buffer poll");
         }
-        Ok(())
     }
 
-    fn on_event(&self) -> Box<dyn FnMut(&[u8]) + Send> {
+    fn on_event(&self, x: &[u8]) {
+        println!("EVENT");
         let tx = self.sender.clone();
-        Box::new(move |x| unsafe {
+        unsafe {
             let data = ptr::read(x.as_ptr() as *const event_t);
 
             let path = CStr::from_ptr(data.path.as_ptr() as *const c_char)
@@ -226,7 +174,7 @@ impl Sweeper {
             } else {
                 println!("╰ 😴 setattr's name should be `user.expire_at`");
             }
-        })
+        }
     }
 }
 
@@ -235,7 +183,7 @@ fn delete(event: &Event) -> Result<()> {
     println!("🚮 Deleting {}", event.path);
 
     // Check that the file indeed has the expire_at xattr
-    fs::remove_file(event.path.to_string()).unwrap();
+    fs::remove_file(&event.path).unwrap();
     Ok(())
 }
 
